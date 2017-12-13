@@ -3,3 +3,7 @@
 
 # Hidden files
 .*
+
+
+# Data files
+*.csv
