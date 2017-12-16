@@ -7,3 +7,7 @@
 
 # Data files
 *.csv
+*.data
+
+# PDF files
+*.pdf
