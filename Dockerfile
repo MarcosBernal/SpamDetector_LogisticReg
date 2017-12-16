@@ -34,7 +34,5 @@ RUN    pip3 install -U spyder
 # Creating workspace
 RUN    mkdir /home/dev
 RUN    cd /home/dev
-ADD    start-spyder.sh /start-spyder.sh
-RUN    chmod +x /start-spyder.sh
 
 CMD /bin/bash
