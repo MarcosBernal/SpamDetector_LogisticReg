@@ -14,4 +14,4 @@ sudo docker run --rm \
     -v $(pwd)/$(dirname $0)/notebook:/home/dev \
     -v /tmp/.X11-unix:/tmp/.X11-unix:ro \
     -e DISPLAY=unix$DISPLAY \
-    spyder-jupyter-pyspark spyder3 -w /home/dev
+    spyder-jupyter-pyspark /bin/bash #spyder3 -w /home/dev
