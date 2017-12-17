@@ -35,7 +35,11 @@ RUN    pip3 install -U spyder
 RUN    mkdir /home/dev
 RUN    cd /home/dev
 
+RUN apt-get install -y libxext-dev libxrender-dev libxtst-dev
+
 # Create env variable for using python3 with spark
-RUN    echo -e "PYSPARK_PYTHON=/usr/bin/python3\nPYSPARK_DRIVER_PYTHON=ipython3" > /etc/profile.d/pyspark_python_version.sh
+ENV    PYSPARK_PYTHON=/usr/bin/python3
+ENV    PYSPARK_DRIVER_PYTHON=ipython3
+
 
 CMD /bin/bash
