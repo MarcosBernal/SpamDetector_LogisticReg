@@ -4,7 +4,8 @@ import math
 from pyspark import SparkContext, SparkConf
 
 # If spark context was not defined before
-conf = SparkConf().setAppName("Spam Filter").setMaster("local[1]").set("spark.hadoop.validateOutputSpecs", "false");
+n_executors_spark = 6
+conf = SparkConf().setAppName("Spam Filter").setMaster("local["+str(n_executors_spark)+"]").set("spark.hadoop.validateOutputSpecs", "false");
 sc =   SparkContext.getOrCreate(conf=conf)
 
 
@@ -51,7 +52,7 @@ train_validation_rdd = train_validation_rdd.cache()
 test_rdd = test_rdd.cache()
 
 # save test set in a file
-test_rdd.saveAsTextFile('spam.test.set')
+# test_rdd.saveAsTextFile('spam.test.set')
 
 print("Train & Validation: ", train_validation_rdd.count(), " samples")
 print("Test: ", test_rdd.count(), " samples")

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import time
 import spark_implementation as our
-from rdd_creation_and_stats import sc, train_validation_rdd#, test_rdd
+from rdd_creation_and_stats import sc, n_executors_spark, train_validation_rdd#, test_rdd
 
 
 # Testing sequential and spark version of logistic regression with a linear solvable problem
@@ -43,7 +43,7 @@ iterations = 100
 lambda_reg = 0.5
 show_ite = 50
 
-print("\nTraining SPARK algorithm with ", iterations," iterations", " and ", list_size, "different l_rates")    
+print("\nTraining SPARK algorithm ", n_executors_spark, " executors. ", iterations," iterations", " and ", list_size, "different l_rates")    
 start = time.time()
 values_spark = our.optimal_learning_rate_value_spark(train_validation_rdd, initial_l_rate=l_rate, list_size=list_size, max_iterations=iterations, lambda_reg=lambda_reg, show_iteration=show_ite)
 end = time.time()
