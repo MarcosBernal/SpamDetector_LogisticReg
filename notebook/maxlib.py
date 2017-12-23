@@ -128,3 +128,19 @@ def get_cost(data_rdd, W, lambdareg=0):
     cost = - cost/m + ( lambdareg/(2*m) * np.dot(W, W) )
     
     return cost
+
+def append_hypothesis(d_f__X_y, W):
+    (d, f) = d_f__X_y[0]
+    (X, y) = d_f__X_y[1]
+    return ((d, f), (X, y) + (predict(W[d][f], X), ))
+
+def get_train_cost(d_f__costsum, W, M, train_size):
+    (d, f) = d_f__costsum[0]
+    costsum = d_f__costsum[1]
+    lambdareg = M[d][1]
+    return ((d, f), - costsum/train_size + lambdareg/(2*train_size) * np.sum(np.square(W[d][f])))
+
+def expand_features(d_f__X_y_h, n_feats):
+    (d, f) = d_f__X_y_h[0]
+    X_y_h = d_f__X_y_h[1]
+    return [((d, f, j), get_weight_upd(X_y_h, j)) for j in range(n_feats)]
