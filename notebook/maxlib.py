@@ -41,8 +41,8 @@ def get_train_validation_rdds(sub_rdds, k):
 
 # x is the features vector without label (x0 is always 1)
 # w is the weights vector (w0 is the bias)
-def predict(W, X, decision_boundary = 0.5):
-    return int(1 / (1 + math.exp(-(np.dot(W, X)))) <= decision_boundary)
+def predict(W, X):
+    return 1 / (1 + math.exp(-(np.dot(W, X))))
 
 def get_cost_upd(y_yhat):
     y, yhat = y_yhat
@@ -55,7 +55,7 @@ def get_weight_upd(X_y_yhat, j):
 
 
 def gradient_descent(train_rdd, n_epochs=1000, alpha0=0.1, lambdareg=0, decay=0, 
-                     decision_boundary = 0.5, plot=True, seed=123):
+                     plot=True, seed=123):
     
     m = train_rdd.count()
     n = len(train_rdd.first()[0]) 
@@ -75,8 +75,7 @@ def gradient_descent(train_rdd, n_epochs=1000, alpha0=0.1, lambdareg=0, decay=0,
         #FIRST STEP: compute the predictions for the given weights and append them to the rest
         # REMEMBER: every row of the rdd is now a tuple (feature_vector, true_label)
         predictions_rdd = train_rdd\
-        .map(lambda X_y: X_y + (predict(W, X_y[0], decision_boundary),))\
-        .cache()
+        .map(lambda X_y: X_y + (predict(W, X_y[0]),))
     
         #SECOND STEP: compute the total cost for the computed predictions
         cost = predictions_rdd\
@@ -113,13 +112,13 @@ def gradient_descent(train_rdd, n_epochs=1000, alpha0=0.1, lambdareg=0, decay=0,
     return (cost, W)
 
 
-def get_cost(data_rdd, W, lambdareg=0, decision_boundary=0.5):
+def get_cost(data_rdd, W, lambdareg=0):
     m = data_rdd.count()
     
     #FIRST STEP: compute the predictions for the given weights and append them to the rest
     # REMEMBER: every row of the rdd is now a tuple (feature_vector, true_label)
     predictions_rdd = data_rdd\
-    .map(lambda X_y: X_y + (predict(W, X_y[0], decision_boundary),))\
+    .map(lambda X_y: X_y + (predict(W, X_y[0]),))\
     .cache()
     
     cost = predictions_rdd\
