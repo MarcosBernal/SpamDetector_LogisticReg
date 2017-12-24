@@ -45,36 +45,43 @@ min_alpha0 = 0.01; max_alpha0 = 0.5
 min_lambdareg = 0.0; max_lambdareg = 1.0
 
 #%% MODEL DEFINITION (HYPERPARAMETERS)
-M = [(np.random.uniform(low=min_alpha0, high=max_alpha0),
-          np.random.uniform(low=min_lambdareg, high=max_lambdareg)) for _ in range(n_models-1)]
+M = sorted([(np.random.uniform(low=min_alpha0, high=max_alpha0),
+          np.random.uniform(low=min_lambdareg, high=max_lambdareg)) for _ in range(n_models-1)])
 M.append((0.5, 0))
 
+# for every original data vector, create 1 new for each model
 models_rdd = non_test_rdd\
 .flatMap(lambda Xy: [(d, Xy) for d in range(n_models)]).sortByKey(True)
 
 
 #%% CROSS VALIDATION SPLIT
 
-kfold_rdd = models_rdd\
+# for every data vector and for every model, create 1 new for each iteration
+model_fold_rdd = models_rdd\
 .flatMap(lambda d__X_y: [((d__X_y[0], f), d__X_y[1]) for f in range(k)]).sortByKey(True)\
 .zipWithIndex().map(lambda df_Xy__i: 
     (df_Xy__i[0][0], 
      (df_Xy__i[1] % k, ) + df_Xy__i[0][1]))
 
-kfold_train_rdd = kfold_rdd\
+model_fold_train_rdd = model_fold_rdd\
 .filter(lambda d_f__i_Xy: d_f__i_Xy[0][1] != d_f__i_Xy[1][0])\
 .mapValues(lambda i__X_y: i__X_y[1:])\
 .cache()
 
-kfold_validation_rdd = kfold_rdd\
+model_fold_validation_rdd = model_fold_rdd\
 .filter(lambda d_f__i_Xy: d_f__i_Xy[0][1] == d_f__i_Xy[1][0])\
 .mapValues(lambda i__X_y: i__X_y[1:])\
 .cache()
 
 n = len(non_test_rdd.first()[0])
-m = kfold_train_rdd.count() / (n_models * k)
+mt = model_fold_train_rdd.count() / (n_models * k)
 
+# instantiate a Weights list containing one array for each model
+# each array corresponds to the most updated weights vector for a given model
 W = [[np.random.rand(n) for _ in range(k)] for _ in range(n_models)]
+
+# instantiate a cost hisotry list containing one array for each model
+# each array corresponds to the most updated history of training costs for a given model
 trainCosts_history = [[[] for _ in range(k)] for _ in range(n_models)]
 
     
@@ -85,58 +92,70 @@ for epoch in range(400):
 
     epoch_start = time.time()
     
-    # STEP 1: compute predictions with the new weights
-    hypothesis_rdd = kfold_train_rdd\
+    # STEP 1: compute predictions with the new weights 
+    # and append them to the original rdd
+    hypothesis_rdd = model_fold_train_rdd\
     .map(lambda d_f__X_y: append_hypothesis(d_f__X_y, W))\
     .cache() # <<<<< important to cache!
     
 
-    #SECOND 2: compute the total cost for the new predictions
+    #SECOND 2: compute the total cost for the new predictions 
+    # for every model d and every cross-validation iteration k
     trainCosts_dict = hypothesis_rdd\
     .mapValues(lambda X_y_h: get_cost_upd(X_y_h[1:]))\
     .reduceByKey(lambda df_upd1, df_upd2: df_upd1 + df_upd2).sortByKey(True)\
-    .map(lambda d_f__costsum: get_train_cost(d_f__costsum, W, M, m))\
+    .map(lambda d_f__costsum: get_train_cost(d_f__costsum, W, M, mt))\
     .collectAsMap()
     
+    # append the last training costs to the history list
     for (d, f) in trainCosts_dict:
         trainCosts_history[d][f].extend([trainCosts_dict[(d, f)]])
     
     
-    # STEP 3: update all the weights simoultaneously 
+    # STEP 3: 
+    # - for every model and fold vector, create 1 new for every feature
+    # - compute all the weights updates simoultaneously for all the models, folds and features
+    # - get the updates in the form of a dictionary
     Wupds = hypothesis_rdd\
     .flatMap(lambda d_f__X_y_h: expand_features(d_f__X_y_h, n))\
     .reduceByKey(lambda dfj_upd1, dfj_upd2: dfj_upd1 + dfj_upd2).sortByKey(True)\
     .collectAsMap()
     
+    # update the weights for every model, fold, and feature in the dictionary
     for (d, f, j) in Wupds:
         alpha = M[d][0]
         lambdareg = M[d][1]
-        reg = (1 - alpha/m * lambdareg)
-        W[d][f][j] = W[d][f][j] * reg - alpha / m * Wupds[(d, f, j)]
+        reg = (1 - alpha/mt * lambdareg)
+        W[d][f][j] = W[d][f][j] * reg - alpha / mt * Wupds[(d, f, j)]
         
     epoch_end = time.time()
     
     if (epoch % 50 == 0):
-        print("(",epoch,") Gradient Descent running time: ", (epoch_end - epoch_start)/60, "mins")
+        print("(",epoch,") Step running time: ", (epoch_end - epoch_start), "s")
         
 end = time.time()
 print("Total Gradient-Descent Running Time: ", (end-start)/60, "mins")
         
 #%% VALIDATION
+mv = model_fold_validation_rdd.count() / (n_models * k)
 
-kfoldModelsCosts_dict = kfold_validation_rdd\
+kfoldModelsCosts_dict = model_fold_validation_rdd\
 .map(lambda d_f__X_y: append_hypothesis(d_f__X_y, W))\
 .mapValues(lambda X_y_h: get_cost_upd(X_y_h[1:]))\
 .reduceByKey(lambda df_upd1, df_upd2: df_upd1 + df_upd2).sortByKey(True)\
-.map(lambda d_f__costsum: get_train_cost(d_f__costsum, W, M, m))\
+.map(lambda d_f__costsum: get_train_cost(d_f__costsum, W, M, mv))\
 .map(lambda df_cost: (df_cost[0][0], df_cost[1]))\
 .reduceByKey(lambda d_cost1, d_cost2: d_cost1+d_cost2)\
 .mapValues(lambda validation_cost_sum: validation_cost_sum / k)\
 .collectAsMap()
 
 end = time.time()
+best_model = min(kfoldModelsCosts_dict, key=kfoldModelsCosts_dict.get)
+
 print("Total Cross-Validation Elapsed Time: ", (end-start)/60, "mins")
-print("Cross Validation Error: ", kfoldModelsCosts_dict)
+print("Cross Validation Errors: ", kfoldModelsCosts_dict)
+print("Best Model: ", best_model, 
+      "(alpha: ", M[best_model][0],", lambda: ", M[best_model][1], ")")
 
 
 # divide the non-test rdd in 4 sub-rdds
