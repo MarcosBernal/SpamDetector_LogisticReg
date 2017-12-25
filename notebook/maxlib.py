@@ -42,12 +42,21 @@ def get_train_validation_rdds(sub_rdds, k):
 # x is the features vector without label (x0 is always 1)
 # w is the weights vector (w0 is the bias)
 def predict(W, X):
-    return 1 / (1 + math.exp(-(np.dot(W, X))))
+    try:
+        return 1 / (1 + math.exp(-(np.dot(W, X))))
+    except OverflowError:
+        return 0
 
 def get_cost_upd(y_yhat):
     y, yhat = y_yhat
-    return y * math.log(yhat) + (1-y) * math.log(1-yhat)
+    return y * safe_log(yhat) + (1-y) * safe_log(1-yhat)
 
+def safe_log(x):
+    try:
+        return math.log(x)
+    except ValueError:
+        return 0
+    
 # when j = 0, X[j] = 1, so we get (yhat - y), i.e the update for the bias
 def get_weight_upd(X_y_yhat, j):
     X, y, yhat = X_y_yhat
@@ -61,7 +70,6 @@ def gradient_descent(train_rdd, n_epochs=1000, alpha0=0.1, lambdareg=0, decay=0,
     n = len(train_rdd.first()[0]) 
     np.random.seed(seed); new_W = np.random.rand(n)
     
-    old_cost = 0
     cost_history = []
     
     start = time.time()
@@ -85,7 +93,6 @@ def gradient_descent(train_rdd, n_epochs=1000, alpha0=0.1, lambdareg=0, decay=0,
         cost = - cost/m + ( lambdareg/(2*m) * np.dot(W, W) )
         
         cost_history.append(cost)
-        old_cost = cost
         
         if (epoch % 50 == 0):
             print("(", epoch, ") Cost: ", cost)
@@ -134,11 +141,12 @@ def append_hypothesis(d_f__X_y, W):
     (X, y) = d_f__X_y[1]
     return ((d, f), (X, y) + (predict(W[d][f], X), ))
 
-def get_train_cost(d_f__costsum, W, M, train_size):
+def get_train_cost(d_f__costsum, W, M, trainRdd_sizes):
     (d, f) = d_f__costsum[0]
     costsum = d_f__costsum[1]
     lambdareg = M[d][1]
-    return ((d, f), - costsum/train_size + lambdareg/(2*train_size) * np.sum(np.square(W[d][f])))
+    m = trainRdd_sizes[f]
+    return ((d, f), - costsum/m + lambdareg/(2*m) * np.sum(np.square(W[d][f][1: ])))
 
 def expand_features(d_f__X_y_h, n_feats):
     (d, f) = d_f__X_y_h[0]
