@@ -1,12 +1,11 @@
 
 # coding: utf-8
 import numpy as np
-import time
+import time, math
 from pyspark import SparkContext, SparkConf
 from marcoslib import normalize_data
 import maxlib as mxl
 import matplotlib.pyplot as plt
-import math
 
     
 n_executors_spark = 2
@@ -42,17 +41,20 @@ nonTestRdd, testRdd = master_norm_rdd.randomSplit([0.8, 0.2])
 
 ########## PARALLELIZED CROSS-VALIDATION #####################################
 #%% CONSTANTS
-n_models = 10   # number of models to train
 n_folds = 4     # k-fold iterations
-n_epochs = 1000  # number of gradient descent iterations
 n_feats = len(nonTestRdd.first()[0]) # number of features
+
+#%% PARAMETERS
+n_models = 3   # number of models to train
+n_epochs = 400  # number of gradient descent iterations
 
 #%% MODEL DEFINITION (HYPERPARAMETERS)
 min_alpha0 = 0.001; max_alpha0 = 0.004
 min_lambdareg = 0.0; max_lambdareg = 3.0
 
 HyperParams = sorted([(np.random.uniform(low=min_alpha0, high=max_alpha0),
-                       np.random.uniform(low=min_lambdareg, high=max_lambdareg)) for _ in range(n_models)])
+                       np.random.uniform(low=min_lambdareg, high=max_lambdareg)) 
+                      for _ in range(n_models)])
 
 HyperParams = dict(zip(range(n_models), HyperParams))
 print(">>> MODELS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
@@ -79,11 +81,11 @@ trainRdd_foldsSizes = trainRdd_byFold.countByKey()
 validRdd_foldsSizes = validationRdd_ByFold.countByKey()
 
 trainRdd_byModelAndFold = trainRdd_byFold\
-.flatMap(lambda f__Xy: [((d, f__Xy[0]), f__Xy[1]) for d in range(n_models)])\
+.flatMap(lambda f__Xy: [((m, f__Xy[0]), f__Xy[1]) for m in range(n_models)])\
 .cache()
 
 validationRdd_byModelAndFold = validationRdd_ByFold\
-.flatMap(lambda f__Xy: [((d, f__Xy[0]), f__Xy[1]) for d in range(n_models)])\
+.flatMap(lambda f__Xy: [((m, f__Xy[0]), f__Xy[1]) for m in range(n_models)])\
 .cache()
 
 #%% MODEL SELECTION 1 - TRAINING (CROSS VALIDATION w/ GRADIENT DESCENT)
@@ -103,9 +105,8 @@ costsHistory_CV = [[[] for _ in range(n_folds)] for _ in range(n_models)]
 
 # >> GRADIENT DESCENT
 epoch = 0
-tolerance = 0.005
+tolerance = 1e-05
 modelsAndFoldsLeft = trainRdd_byModelAndFold.groupByKey().count()
-convergences = 0
 start = time.time()
 while (epoch < n_epochs and modelsAndFoldsLeft > 0):
 
@@ -113,37 +114,37 @@ while (epoch < n_epochs and modelsAndFoldsLeft > 0):
     
     # step 1) compute predictions with the current weights and append them to the original rdd
     hypothesis_CV = trainRdd_byModelAndFold\
-    .map(lambda d_f__Xy: mxl.append_hypothesis(d_f__Xy, W_CV))\
+    .map(lambda m_f__Xy: mxl.append_hypothesis(m_f__Xy, W_CV))\
     .cache() # <<<<< important to cache!
     
 
-    # step 2) compute the total cost for the new predictions for every model d and every fold f
+    # step 2) compute the total cost for the new predictions for every model m and every fold f
     costsDict_CV = hypothesis_CV\
     .mapValues(lambda X_y_h: mxl.get_cost_upd(X_y_h[1:]))\
-    .reduceByKey(lambda df_upd1, df_upd2: df_upd1 + df_upd2).sortByKey(True)\
-    .map(lambda d_f__costsum: mxl.get_train_cost(d_f__costsum, W_CV, HyperParams, 
+    .reduceByKey(lambda mf_upd1, mf_upd2: mf_upd1 + mf_upd2).sortByKey(True)\
+    .map(lambda m_f__costsum: mxl.get_train_cost(m_f__costsum, W_CV, HyperParams, 
                                                  trainRdd_foldsSizes))\
     .collectAsMap()
     
     # append the last training costs to the history list
-    for (d, f) in costsDict_CV:
-        newCost = costsDict_CV[(d, f)]
-        costsHistory_CV[d][f].extend([newCost])
+    for (m, f) in costsDict_CV:
+        newCost = costsDict_CV[(m, f)]
+        costsHistory_CV[m][f].extend([newCost])
         
         if (epoch == 0):
             continue
         
-        lastCost = costsHistory_CV[d][f][-2]
+        lastCost = costsHistory_CV[m][f][-2]
     
         # when the improvement in the cost is too small for a given model and fold,
         # keep only the rows that are not associated with it
         if (abs(lastCost - newCost) <= tolerance):
             trainRdd_byModelAndFold = trainRdd_byModelAndFold\
-            .filter(lambda d_f__Xy: d_f__Xy[0] != (d, f))\
+            .filter(lambda m_f__Xy: m_f__Xy[0] != (m, f))\
             .cache()
             
             modelsAndFoldsLeft -= 1
-            print(">> Model {d}, fold {f} converged.".format(d=d, f=f))
+            print(">> Model {m}, fold {f} converged.".format(m=m, f=f))
         
         
     # step 3) 
@@ -151,15 +152,15 @@ while (epoch < n_epochs and modelsAndFoldsLeft > 0):
     # - compute all the weights updates simoultaneously for all the models, folds and features
     # - get the updates in the form of a dictionary
     Wupds_CV = hypothesis_CV\
-    .flatMap(lambda d_f__X_y_h: mxl.expand_features(d_f__X_y_h, n_feats))\
-    .reduceByKey(lambda dfj_upd1, dfj_upd2: dfj_upd1 + dfj_upd2).sortByKey(True)\
+    .flatMap(lambda m_f__X_y_h: mxl.expand_features(m_f__X_y_h, n_feats))\
+    .reduceByKey(lambda mfj_upd1, mfj_upd2: mfj_upd1 + mfj_upd2).sortByKey(True)\
     .collectAsMap()
     
     # update the weights for every model, fold, and feature in the dictionary
-    for (d, f, j) in Wupds_CV:
-        alpha = HyperParams[d][0]
-        lambdareg = HyperParams[d][1]
-        W_CV[d][f][j] = W_CV[d][f][j] * (1 - alpha * lambdareg) - alpha * Wupds_CV[(d, f, j)]
+    for (m, f, j) in Wupds_CV:
+        alpha = HyperParams[m][0]
+        lambdareg = HyperParams[m][1]
+        W_CV[m][f][j] = W_CV[m][f][j] * (1 - alpha * lambdareg) - alpha * Wupds_CV[(m, f, j)]
         
     epoch_end = time.time()
     print(epoch, " (", epoch_end - epoch_start, "s)")
@@ -167,7 +168,7 @@ while (epoch < n_epochs and modelsAndFoldsLeft > 0):
     epoch += 1
         
 end = time.time()
-print("Total Gradient-Descent Running Time: ", (end-start)/60, "mins")
+print("Total Gradient-Descent Running Time: {mins}mins".format(mins=(end-start)/60))
         
 #%% MODEL SELECTION 2 - VALIDATION
 
@@ -178,19 +179,19 @@ print("Total Gradient-Descent Running Time: ", (end-start)/60, "mins")
 # 3) finally,select the model with minimum avg CV error to be the best model (bM)
 
 modelsCVCostsDict = validationRdd_byModelAndFold\
-.map(lambda d_f__Xy: mxl.append_hypothesis(d_f__Xy, W_CV))\
+.map(lambda m_f__Xy: mxl.append_hypothesis(m_f__Xy, W_CV))\
 .mapValues(lambda X_y_h: mxl.get_cost_upd(X_y_h[1:]))\
-.reduceByKey(lambda df_upd1, df_upd2: df_upd1 + df_upd2).sortByKey(True)\
-.map(lambda d_f__costsum: mxl.get_train_cost(d_f__costsum, W_CV, HyperParams, validRdd_foldsSizes))\
-.map(lambda df_cost: (df_cost[0][0], df_cost[1]))\
-.reduceByKey(lambda d_cost1, d_cost2: d_cost1+d_cost2)\
+.reduceByKey(lambda mf_upd1, mf_upd2: mf_upd1 + mf_upd2).sortByKey(True)\
+.map(lambda m_f__costsum: mxl.get_train_cost(m_f__costsum, W_CV, HyperParams, validRdd_foldsSizes))\
+.map(lambda mf_cost: (mf_cost[0][0], mf_cost[1]))\
+.reduceByKey(lambda m_cost1, m_cost2: m_cost1+m_cost2)\
 .mapValues(lambda validation_cost_sum: validation_cost_sum / n_folds)\
 .collectAsMap()
 
 bestModel = min(modelsCVCostsDict, key=modelsCVCostsDict.get)
 
 end = time.time()
-print("Total Cross-Validation Elapsed Time: ", (end-start)/60, "mins")
+print("Total Cross-Validation Elapsed Time: {mins}mins".format(mins=(end-start)/60))
 print("Cross Validation Errors: ", modelsCVCostsDict)
 print("Best Model: ", bestModel, 
       "(alpha: ", HyperParams[bestModel][0],", lambda: ", HyperParams[bestModel][1], ")")
@@ -200,7 +201,7 @@ print("Best Model: ", bestModel,
 # 1) once a model is selected, use its hyperparameters to train a new model
 #    using all the non-test data
 
-m = nonTestRdd.count()
+size = nonTestRdd.count()
 alpha_bM = HyperParams[bestModel][0]
 lambdareg_bM = HyperParams[bestModel][1]
 W_train = [np.random.uniform(-3,3) for _ in range(n_feats)]
@@ -217,10 +218,10 @@ for epoch in range(n_epochs):
     
 
     #SECOND 2: compute the total cost for the new predictions 
-    # for every model d and every fold f
+    # for every model m and every fold f
     trainCost_bM = - hypothesis_bM\
     .map(lambda X_y_h: mxl.get_cost_upd(X_y_h[1:]))\
-    .reduce(lambda upd1, upd2: upd1 + upd2) / m + ( lambdareg_bM / (2*m) * np.sum(np.square(W_train[1:])))
+    .reduce(lambda upd1, upd2: upd1 + upd2) / size + ( lambdareg_bM / (2*size) * np.sum(np.square(W_train[1:])))
     
     
     # STEP 3: 
@@ -245,29 +246,72 @@ for epoch in range(n_epochs):
 #    N.B. Now the prediction must be 0 or 1 --> we can use different decision boundaries
 #         for the sigmoid function
 # 2) compute different sets of predictions for every decision boundary considered
-# 3) compute true positives, false pos, false neg, true neg for every db
-# 4) use tp, fp, fn, tn to compute accuracy, precision, recall and fallout for every db
+# 3) compute true positives, false pos, false neg, true neg for every psi
+# 4) use tp, fp, fn, tn to compute accuracy, precision, recall and fallout for every psi
 # 5) use fallout and recall to plot a roc curve
 
-decision_boundaries = np.linspace(0,1,101)
+Psi = np.linspace(0,1,502)[2:-2]
 
-scores = testRdd\
-.flatMap(lambda X_y: [(db, (X_y[1], int(mxl.predict(W_train, X_y[0]) > db))) 
-                      for db in decision_boundaries])\
-.mapValues(lambda y_h: [int(y_h[0] == 1 and y_h[1] == 1),
-                        int(y_h[0] == 0 and y_h[1] == 1),
-                        int(y_h[0] == 1 and y_h[1] == 0),
-                        int(y_h[0] == 0 and y_h[1] == 0)])\
-.reduceByKey(lambda counters1, counters2: [sum(x) for x in zip(counters1, counters2)])\
+confusionMatrices = testRdd\
+.flatMap(lambda X_y: [(psi, (X_y[1], int(mxl.predict(W_train, X_y[0]) > psi))) for psi in Psi])\
+.mapValues(lambda y_h: [int(y_h == (1,1)), int(y_h == (0, 1)), int(y_h == (1, 0)), int(y_h == (0, 0))])\
+.reduceByKey(lambda counters1, counters2: [sum(x) for x in zip(counters1, counters2)])
+
+advMetrics = confusionMatrices\
 .mapValues(lambda tp_fp_fn_tn: [(tp_fp_fn_tn[0] + tp_fp_fn_tn[3]) / sum(tp_fp_fn_tn),
                              tp_fp_fn_tn[0] / (tp_fp_fn_tn[0] + tp_fp_fn_tn[1]),
                              tp_fp_fn_tn[0] / (tp_fp_fn_tn[0] + tp_fp_fn_tn[2]),
                              tp_fp_fn_tn[1] / (tp_fp_fn_tn[1] + tp_fp_fn_tn[3]) ])\
 .collectAsMap()
 
-fallouts = [scores[db][3] for db in sorted(scores)]
-recalls = [scores[db][2] for db in sorted(scores)]
+fallouts = [advMetrics[psi][3] for psi in advMetrics]
+recalls = [advMetrics[psi][2] for psi in advMetrics]
+f_r = [((advMetrics[psi][3], advMetrics[psi][2]), psi) for psi in advMetrics]
+diagonal = sorted([(f, f) for f in fallouts])
+inverse_diagonal = sorted([(f, 1-f) for f in fallouts])
+
+# measure the delta y for the points of roc curve and the points of the inverse diagonal line
+# the x at which the delta y is minimal it's a good estimator of where the two lines intersect;
+# the psi of the point of intersection can be then selected as best psi
+invDiagDist_x_y__psi = [(abs(y1 - y2), (x1, y1), psi) 
+                    for ((x1,y1), psi), (x2, y2) in zip(sorted(f_r), sorted(inverse_diagonal))]
+invDiagDist_bestResult = min(invDiagDist_x_y__psi)[1:]
+print(">> Best decision boundary (inv. diag. intersection): {best_psi} \n(fpr: {fpr}, tpr: {tpr})"\
+      .format(best_psi=invDiagDist_bestResult[1], 
+              fpr=invDiagDist_bestResult[0][0], 
+              tpr=invDiagDist_bestResult[0][1]))
+
+# measure the distance from the non-discrimination line
+# the psi of the point with max distance from the non-discrimination line can be 
+# considered as the best psi
+diagDist_x_y__psi = [(math.sqrt((x1 - x2)**2 + (y1 - y2)**2), (x1, y1), psi) 
+                    for ((x1,y1), psi), (x2, y2) in zip(sorted(f_r), sorted(diagonal))]
+diagDist_bestResult = max(diagDist_x_y__psi)[1:]
+print(">> Best decision boundary (diag. distance): {best_psi} \n(fpr: {fpr}, tpr: {tpr})"\
+      .format(best_psi=diagDist_bestResult[1], 
+              fpr=diagDist_bestResult[0][0], 
+              tpr=diagDist_bestResult[0][1]))
+
+# measure the distance from the optimal point (0,1) for every point of the roc curve
+# the point with the minimal distance is also the point with best psi
+bestPointDist_x_y__psi = [(math.sqrt((0-x1)**2 + (1-y1)**2), (x1, y1), psi) 
+                      for ((x1, y1), psi) in sorted(f_r)]
+bestPointDist_bestResult = min(bestPointDist_x_y__psi)[1:]
+print(">> Best decision boundary (best point distance): {best_psi} \n(fpr: {fpr}, tpr: {tpr})"\
+      .format(best_psi=bestPointDist_bestResult[1], 
+              fpr=bestPointDist_bestResult[0][0], 
+              tpr=bestPointDist_bestResult[0][1]))
+
 
 # ROC Curve
-plt.plot(fallouts, recalls)
-plt.plot(np.linspace(0,1,101), np.linspace(0,1,101)[::-1])
+fig, ax = plt.subplots()
+ax.plot(sorted(fallouts), sorted(recalls)) # plot ROC curve
+ax.plot([0, 1], [0, 1], "r-") # plot the non-discrimination line
+ax.plot([0, 1], [1, 0], "r--") # plot the inverse diagonal
+ax.scatter(invDiagDist_bestResult[0][0], invDiagDist_bestResult[0][1])
+for (f,r), psi in f_r:
+    if (np.random.rand() < 0.05):
+        ax.annotate(str(round(psi, 3)), (f,r))
+ax.xlim([0,1])
+ax.ylim([0,1])
+
