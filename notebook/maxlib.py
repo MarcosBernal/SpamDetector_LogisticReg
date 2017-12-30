@@ -61,11 +61,16 @@ def get_cost_upd(y_yhat):
     return y * safe_log(yhat) + (1-y) * safe_log(1-yhat)
 
 def safe_log(x):
-    try:
-        return math.log(x)
-    except ValueError:
+    if (x == 0):
         return 0
     
+    return math.log(x)
+    
+def safe_division(x,y):
+    if (y == 0):
+        return 0
+    
+    return x/y
 # when j = 0, X[j] = 1, so we get (yhat - y), i.e the update for the bias
 def get_weight_upd(X_y_yhat, j):
     X, y, yhat = X_y_yhat
