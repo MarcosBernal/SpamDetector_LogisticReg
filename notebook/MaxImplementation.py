@@ -18,7 +18,7 @@ sc =   SparkContext.getOrCreate(conf=conf)
 
 #%%
 
-file_object  = open('filtered.spam.data', 'r')
+file_object  = open('spam.data', 'r')
 lines = file_object.readlines()
 file_object.close()
     
@@ -45,12 +45,12 @@ n_folds = 4     # k-fold iterations
 n_feats = len(nonTestRdd.first()[0]) # number of features
 
 #%% PARAMETERS
-n_models = 3   # number of models to train
-n_epochs = 400  # number of gradient descent iterations
+n_models = 5    # number of models to train
+n_epochs = 1000  # number of gradient descent iterations
 
 #%% MODEL DEFINITION (HYPERPARAMETERS)
-min_alpha0 = 0.001; max_alpha0 = 0.004
-min_lambdareg = 0.0; max_lambdareg = 3.0
+min_alpha0 = 0.0001; max_alpha0 = 0.005
+min_lambdareg = 0.0; max_lambdareg = 10
 
 HyperParams = sorted([(np.random.uniform(low=min_alpha0, high=max_alpha0),
                        np.random.uniform(low=min_lambdareg, high=max_lambdareg)) 
@@ -169,7 +169,12 @@ while (epoch < n_epochs and modelsAndFoldsLeft > 0):
         
 end = time.time()
 print("Total Gradient-Descent Running Time: {mins}mins".format(mins=(end-start)/60))
-        
+
+# print for every model and fold the final gradient descent error and the number of epochs 
+for m in range(len(costsHistory_CV)):
+    for f in range(len(costsHistory_CV[0])):
+        print("Model {m}, fold {f}: {err} ({ep})".format(m=m, f=f, err=costsHistory_CV[m][f][-1], ep=len(costsHistory_CV[m][f])))
+       
 #%% MODEL SELECTION 2 - VALIDATION
 
 # 1) once obtained some weights from Cross Validation training use these weights 
