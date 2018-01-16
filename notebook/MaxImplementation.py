@@ -18,7 +18,7 @@ sc =   SparkContext.getOrCreate(conf=conf)
 
 #%%
 
-file_object  = open('spam.data', 'r')
+file_object  = open('filtered.spam.data', 'r')
 lines = file_object.readlines()
 file_object.close()
     
@@ -206,9 +206,10 @@ alpha_bM = HyperParams[bestModel][0]
 lambdareg_bM = HyperParams[bestModel][1]
 W_train = [np.random.uniform(-3,3) for _ in range(n_feats)]
 
+epoch_start = time.time()
+
 for epoch in range(n_epochs):
 
-    epoch_start = time.time()
     
     # STEP 1: compute predictions with the new weights 
     # and append them to the original rdd
@@ -239,6 +240,9 @@ for epoch in range(n_epochs):
     epoch_end = time.time()
     
     print(epoch)
+
+#%%
+print("Total Training time: {mins}mins".format(mins=(epoch_end-epoch_start)/60))
 
 #%% TESTING & SCORING
 
@@ -276,32 +280,46 @@ inverse_diagonal = sorted([(f, 1-f) for f in fallouts])
 invDiagDist_x_y__psi = [(abs(y1 - y2), (x1, y1), psi) 
                     for ((x1,y1), psi), (x2, y2) in zip(sorted(f_r), sorted(inverse_diagonal))]
 invDiagDist_bestResult = min(invDiagDist_x_y__psi)[1:]
-print(">> Best decision boundary (inv. diag. intersection): {best_psi} \n(fpr: {fpr}, tpr: {tpr})"\
+print("----------------------------     FINAL MODEL BUNDARIES    ----------------------")
+print(">> Best decision boundary (inv. diag. intersection): {best_psi} \n(Precision-fpr: {fpr}, Accuracy- tpr: {tpr})"\
       .format(best_psi=invDiagDist_bestResult[1], 
               fpr=invDiagDist_bestResult[0][0], 
               tpr=invDiagDist_bestResult[0][1]))
-
+print("+++++++ Recall and Fallout metrics: \n(recall: {recall}, fallout: {fallout})"\
+      .format(best_psi=invDiagDist_bestResult[1], 
+              recall=advMetrics[invDiagDist_bestResult[1]][2], 
+              fallout=advMetrics[invDiagDist_bestResult[1]][3]))
+print("--------------------------------------------------------------------------")
 # measure the distance from the non-discrimination line
 # the psi of the point with max distance from the non-discrimination line can be 
 # considered as the best psi
 diagDist_x_y__psi = [(math.sqrt((x1 - x2)**2 + (y1 - y2)**2), (x1, y1), psi) 
                     for ((x1,y1), psi), (x2, y2) in zip(sorted(f_r), sorted(diagonal))]
 diagDist_bestResult = max(diagDist_x_y__psi)[1:]
-print(">> Best decision boundary (diag. distance): {best_psi} \n(fpr: {fpr}, tpr: {tpr})"\
+print(">> Best decision boundary (diag. distance): {best_psi} \n(Precision-fpr: {fpr}, Accuracy- tpr: {tpr})"\
       .format(best_psi=diagDist_bestResult[1], 
               fpr=diagDist_bestResult[0][0], 
               tpr=diagDist_bestResult[0][1]))
+print("+++++++ Recall and Fallout metrics:  \n(recall: {recall}, fallout: {fallout})"\
+      .format(best_psi=invDiagDist_bestResult[1], 
+              recall=advMetrics[invDiagDist_bestResult[1]][2], 
+              fallout=advMetrics[invDiagDist_bestResult[1]][3]))
+print("--------------------------------------------------------------------------")
 
 # measure the distance from the optimal point (0,1) for every point of the roc curve
 # the point with the minimal distance is also the point with best psi
 bestPointDist_x_y__psi = [(math.sqrt((0-x1)**2 + (1-y1)**2), (x1, y1), psi) 
                       for ((x1, y1), psi) in sorted(f_r)]
 bestPointDist_bestResult = min(bestPointDist_x_y__psi)[1:]
-print(">> Best decision boundary (best point distance): {best_psi} \n(fpr: {fpr}, tpr: {tpr})"\
+print(">> Best decision boundary (best point distance): {best_psi} \n(Precision-fpr: {fpr}, Accuracy- tpr: {tpr})"\
       .format(best_psi=bestPointDist_bestResult[1], 
               fpr=bestPointDist_bestResult[0][0], 
               tpr=bestPointDist_bestResult[0][1]))
-
+print("+++++++ Recall and Fallout metrics:  \n(recall: {recall}, fallout: {fallout})"\
+      .format(best_psi=invDiagDist_bestResult[1], 
+              recall=advMetrics[invDiagDist_bestResult[1]][2], 
+              fallout=advMetrics[invDiagDist_bestResult[1]][3]))
+#%%
 
 # ROC Curve
 fig, ax = plt.subplots()
@@ -312,6 +330,6 @@ ax.scatter(invDiagDist_bestResult[0][0], invDiagDist_bestResult[0][1])
 for (f,r), psi in f_r:
     if (np.random.rand() < 0.05):
         ax.annotate(str(round(psi, 3)), (f,r))
-ax.xlim([0,1])
-ax.ylim([0,1])
-
+ax.set_xlim([0,1])
+ax.set_ylim([0,1])
+fig.savefig('ROC.png', dpi=100)
