@@ -55,6 +55,12 @@ min_lambdareg = 0.0; max_lambdareg = 10
 HyperParams = sorted([(np.random.uniform(low=min_alpha0, high=max_alpha0),
                        np.random.uniform(low=min_lambdareg, high=max_lambdareg)) 
                       for _ in range(n_models)])
+# !!!! USE THIS IF YOU WANT TO USE THE PARAMS I USED IN RESULT SECTION!!!!
+#HyperParams = [(0.00016986440023933417, 3.6334049595152527), 
+#               (0.00199639261790698, 7.227933759934101), 
+#               (0.0027934899536763013, 9.887308201398312), 
+#               (0.0029176354763686308, 2.8277596301087202), 
+#               (0.0046918501668023384, 1.9870050706805031)]
 
 HyperParams = dict(zip(range(n_models), HyperParams))
 print(">>> MODELS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
@@ -213,8 +219,10 @@ W_train = [np.random.uniform(-3,3) for _ in range(n_feats)]
 
 epoch_start = time.time()
 
-for epoch in range(n_epochs):
-
+epoch = 0
+converged = False
+previousCost = 99999
+while (epoch < n_epochs and not converged):
     
     # STEP 1: compute predictions with the new weights 
     # and append them to the original rdd
@@ -224,11 +232,16 @@ for epoch in range(n_epochs):
     
 
     #SECOND 2: compute the total cost for the new predictions 
-    # for every model m and every fold f
     trainCost_bM = - hypothesis_bM\
     .map(lambda X_y_h: mxl.get_cost_upd(X_y_h[1:]))\
     .reduce(lambda upd1, upd2: upd1 + upd2) / size + ( lambdareg_bM / (2*size) * np.sum(np.square(W_train[1:])))
     
+    # check if the improvement of the cost is below the threshold
+    if (abs(previousCost - trainCost_bM) <= tolerance):
+        converged = True
+    
+    # update the last known cost
+    previousCost = trainCost_bM
     
     # STEP 3: 
     # - for every model and fold vector, create 1 new for every feature
@@ -245,8 +258,8 @@ for epoch in range(n_epochs):
     epoch_end = time.time()
     
     print(epoch)
+    epoch += 1
 
-#%%
 print("Total Training time: {mins}mins".format(mins=(epoch_end-epoch_start)/60))
 
 #%% TESTING & SCORING
@@ -259,18 +272,20 @@ print("Total Training time: {mins}mins".format(mins=(epoch_end-epoch_start)/60))
 # 4) use tp, fp, fn, tn to compute accuracy, precision, recall and fallout for every psi
 # 5) use fallout and recall to plot a roc curve
 
-Psi = np.linspace(0,1,502)[2:-2]
+Psi = np.linspace(0,1,501)[1:-1]
 
 confusionMatrices = testRdd\
 .flatMap(lambda X_y: [(psi, (X_y[1], int(mxl.predict(W_train, X_y[0]) > psi))) for psi in Psi])\
 .mapValues(lambda y_h: [int(y_h == (1,1)), int(y_h == (0, 1)), int(y_h == (1, 0)), int(y_h == (0, 0))])\
 .reduceByKey(lambda counters1, counters2: [sum(x) for x in zip(counters1, counters2)])
 
+confusionMatrices_dict = confusionMatrices.collectAsMap()
+
 advMetrics = confusionMatrices\
 .mapValues(lambda tp_fp_fn_tn: [(tp_fp_fn_tn[0] + tp_fp_fn_tn[3]) / sum(tp_fp_fn_tn),
-                             tp_fp_fn_tn[0] / (tp_fp_fn_tn[0] + tp_fp_fn_tn[1]),
-                             tp_fp_fn_tn[0] / (tp_fp_fn_tn[0] + tp_fp_fn_tn[2]),
-                             tp_fp_fn_tn[1] / (tp_fp_fn_tn[1] + tp_fp_fn_tn[3]) ])\
+                             mxl.safe_division(tp_fp_fn_tn[0] , (tp_fp_fn_tn[0] + tp_fp_fn_tn[1])),
+                             mxl.safe_division(tp_fp_fn_tn[0] , (tp_fp_fn_tn[0] + tp_fp_fn_tn[2])),
+                             mxl.safe_division(tp_fp_fn_tn[1] , (tp_fp_fn_tn[1] + tp_fp_fn_tn[3])) ])\
 .collectAsMap()
 
 fallouts = [advMetrics[psi][3] for psi in advMetrics]
@@ -286,13 +301,12 @@ invDiagDist_x_y__psi = [(abs(y1 - y2), (x1, y1), psi)
                     for ((x1,y1), psi), (x2, y2) in zip(sorted(f_r), sorted(inverse_diagonal))]
 invDiagDist_bestResult = min(invDiagDist_x_y__psi)[1:]
 print("----------------------------     FINAL MODEL BUNDARIES    ----------------------")
-print(">> Best decision boundary (inv. diag. intersection): {best_psi} \n(Precision-fpr: {fpr}, Accuracy- tpr: {tpr})"\
+print(">> Best decision boundary (inv. diag. intersection): {best_psi} \n(Precision: {precision}, Accuracy: {accuracy})"\
       .format(best_psi=invDiagDist_bestResult[1], 
-              fpr=invDiagDist_bestResult[0][0], 
-              tpr=invDiagDist_bestResult[0][1]))
+              accuracy=advMetrics[invDiagDist_bestResult[1]][0], 
+              precision=advMetrics[invDiagDist_bestResult[1]][1]))
 print("+++++++ Recall and Fallout metrics: \n(recall: {recall}, fallout: {fallout})"\
-      .format(best_psi=invDiagDist_bestResult[1], 
-              recall=advMetrics[invDiagDist_bestResult[1]][2], 
+      .format(recall=advMetrics[invDiagDist_bestResult[1]][2], 
               fallout=advMetrics[invDiagDist_bestResult[1]][3]))
 print("--------------------------------------------------------------------------")
 # measure the distance from the non-discrimination line
@@ -301,14 +315,13 @@ print("-------------------------------------------------------------------------
 diagDist_x_y__psi = [(math.sqrt((x1 - x2)**2 + (y1 - y2)**2), (x1, y1), psi) 
                     for ((x1,y1), psi), (x2, y2) in zip(sorted(f_r), sorted(diagonal))]
 diagDist_bestResult = max(diagDist_x_y__psi)[1:]
-print(">> Best decision boundary (diag. distance): {best_psi} \n(Precision-fpr: {fpr}, Accuracy- tpr: {tpr})"\
+print(">> Best decision boundary (diag. distance): {best_psi} \n(Precision: {precision}, Accuracy: {accuracy})"\
       .format(best_psi=diagDist_bestResult[1], 
-              fpr=diagDist_bestResult[0][0], 
-              tpr=diagDist_bestResult[0][1]))
+              accuracy=advMetrics[diagDist_bestResult[1]][0], 
+              precision=advMetrics[diagDist_bestResult[1]][1]))
 print("+++++++ Recall and Fallout metrics:  \n(recall: {recall}, fallout: {fallout})"\
-      .format(best_psi=invDiagDist_bestResult[1], 
-              recall=advMetrics[invDiagDist_bestResult[1]][2], 
-              fallout=advMetrics[invDiagDist_bestResult[1]][3]))
+      .format(recall=advMetrics[diagDist_bestResult[1]][2], 
+              fallout=advMetrics[diagDist_bestResult[1]][3]))
 print("--------------------------------------------------------------------------")
 
 # measure the distance from the optimal point (0,1) for every point of the roc curve
@@ -316,22 +329,23 @@ print("-------------------------------------------------------------------------
 bestPointDist_x_y__psi = [(math.sqrt((0-x1)**2 + (1-y1)**2), (x1, y1), psi) 
                       for ((x1, y1), psi) in sorted(f_r)]
 bestPointDist_bestResult = min(bestPointDist_x_y__psi)[1:]
-print(">> Best decision boundary (best point distance): {best_psi} \n(Precision-fpr: {fpr}, Accuracy- tpr: {tpr})"\
+print(">> Best decision boundary (best point distance): {best_psi} \n(Precision: {precision}, Accuracy: {accuracy})"\
       .format(best_psi=bestPointDist_bestResult[1], 
-              fpr=bestPointDist_bestResult[0][0], 
-              tpr=bestPointDist_bestResult[0][1]))
+              accuracy=advMetrics[bestPointDist_bestResult[1]][0], 
+              precision=advMetrics[bestPointDist_bestResult[1]][1]))
 print("+++++++ Recall and Fallout metrics:  \n(recall: {recall}, fallout: {fallout})"\
-      .format(best_psi=invDiagDist_bestResult[1], 
-              recall=advMetrics[invDiagDist_bestResult[1]][2], 
-              fallout=advMetrics[invDiagDist_bestResult[1]][3]))
+      .format(recall=advMetrics[bestPointDist_bestResult[1]][2], 
+              fallout=advMetrics[bestPointDist_bestResult[1]][3]))
 #%%
 
 # ROC Curve
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(10,8))
+ax.set_ylabel('Recall', fontsize=17)
+ax.set_xlabel('Fallout', fontsize=17)
 ax.plot(sorted(fallouts), sorted(recalls)) # plot ROC curve
 ax.plot([0, 1], [0, 1], "r-") # plot the non-discrimination line
 ax.plot([0, 1], [1, 0], "r--") # plot the inverse diagonal
-ax.scatter(invDiagDist_bestResult[0][0], invDiagDist_bestResult[0][1])
+ax.scatter(invDiagDist_bestResult[0][0], invDiagDist_bestResult[0][1], s=30)
 for (f,r), psi in f_r:
     if (np.random.rand() < 0.05):
         ax.annotate(str(round(psi, 3)), (f,r))
