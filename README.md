@@ -14,6 +14,7 @@ Move to the folder where the repo is placed `i.e. cd SpamDetector_LogisticReg`
   - Build the custom docker file `sudo docker build -t timcera-spyder-pyspark .`
   - Exec the script file `./spyder_spark.sh`
   - The files are saved in the `notebook` folder (arg `-v` of docker)
+  - Main Script is in file `spark_logistic_regression.py`
 
 ### Jupyther
   - The process starts with the script `pyspark-notebook.sh`
