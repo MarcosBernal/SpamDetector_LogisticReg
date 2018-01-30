@@ -16,8 +16,11 @@ Move to the folder where the repo is placed `i.e. cd SpamDetector_LogisticReg`
   - The files are saved in the `notebook` folder (arg `-v` of docker)
   - Main Script is in file `spark_logistic_regression.py`
 
-### Jupyther
+### Jupyter
   - The process starts with the script `pyspark-notebook.sh`
   - Then copy the url to your browser and start working
   - The files are saved in the `notebook` folder (arg `-v` of docker)
   - To end the program use `Ctr+C` and then `Ctrl+C` 
+  
+### Report
+  - You can find a report that describes overall approach and implementation details at https://www.overleaf.com/read/bhhgczxkzrzk
